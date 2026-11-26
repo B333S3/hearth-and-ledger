@@ -67,6 +67,19 @@ export function renderBills(monthKey) {
     const bill = state.bills.find((b) => b.id === entry.billId);
     return `<div class="bill-row"><div class="bill-main"><p><b>${escapeHtml(bill ? bill.name : entry.billId)}</b></p><p class="sub">${fmtDay(entry.date)} · for ${escapeHtml(entry.month)}</p></div><b>${fmtMoney(entry.amount)}</b></div>`;
   }).join('') : '<p class="mini-note">No payments recorded yet — record one from a bill above and it will appear here with its date and amount.</p>';
+
+  // What the eight bills cost over a full year, dearest first — the number
+  // the household actually commits to when it signs each one.
+  const annualList = [...state.bills]
+    .map((bill) => ({ bill, yearly: bill.amount * 12 }))
+    .sort((a, b) => b.yearly - a.yearly);
+  const annualRows = annualList
+    .map(({ bill, yearly }) => {
+      const cat = categoryById(bill.category);
+      return `<div class="bill-row"><span class="cat-dot" style="background:${cat.color}"></span><div class="bill-main"><p><b>${escapeHtml(bill.name)}</b></p><p class="sub">${fmtMoney(bill.amount)} a month</p></div><b>${fmtMoney(yearly)} / year</b></div>`;
+    }).join('');
+  const annualTotal = state.bills.reduce((sum, bill) => sum + bill.amount * 12, 0);
+  const dearestBill = annualList[0];
   return `
   <div class="page-head">
     <h1>Bills &amp; due dates</h1>
@@ -86,6 +99,11 @@ export function renderBills(monthKey) {
     <p class="sub">Every payment recorded on this page, newest first — the receipt book for the month's bills.</p>
     ${logRows}
     ${paymentLog.length > 10 ? `<p class="mini-note" style="margin-top:8px">Showing the newest ten of ${paymentLog.length} recorded payments.</p>` : ''}
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2>What the bills cost in a year</h2>
+    <p class="sub">All eight recurring bills, ${fmtWhole(annualTotal)} a year — ${escapeHtml(dearestBill.bill.name.split('(')[0].trim())} alone is ${fmtWhole(dearestBill.yearly)} of it. The rest is the price of keeping the lights, the phones and the streaming on.</p>
+    ${annualRows}
   </div>`;
 }
 

@@ -106,8 +106,11 @@ export function renderTransactions(monthKey) {
     <select id="tx-sort" class="inline-input" aria-label="Sort transactions">${sortOptions}</select>
     <span class="spacer"></span>
     <button class="btn btn-small" id="data-export" type="button">Export JSON</button>
+    <button class="btn btn-small" id="data-export-csv" type="button">Export CSV</button>
     <button class="btn btn-small" id="data-import-btn" type="button">Import JSON</button>
+    <button class="btn btn-small" id="data-import-csv-btn" type="button">Import CSV</button>
     <input id="data-import-file" type="file" accept="application/json,.json" hidden>
+    <input id="data-import-csv-file" type="file" accept="text/csv,.csv" hidden>
     <button class="btn btn-small" id="data-reset" type="button">Reset data</button>
   </div>
   <div class="grid grid-3">

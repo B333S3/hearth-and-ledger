@@ -20,7 +20,7 @@ const ROUTES = {
   budget: { render: renderBudget, bind: () => bindBudget() },
   transactions: { render: renderTransactions, bind: (rerender) => bindTransactions(rerender) },
   bills: { render: renderBills, bind: (rerender) => bindBills(currentMonth, rerender) },
-  goals: { render: renderGoals, bind: (rerender) => bindGoals(rerender) },
+  goals: { render: renderGoals, bind: (rerender) => bindGoals(currentMonth, rerender) },
   insights: { render: renderInsights, bind: () => {} },
   // The year in review is a sub-page of Insights, reached only from the link
   // at the bottom of that page: it has no side-navigation entry, so the

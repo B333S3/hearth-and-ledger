@@ -62,6 +62,20 @@ export function renderGoals(monthKey) {
     </div>`;
   }).join('');
 
+  const goalOptions = state.goals.map((g) =>
+    `<option value="${g.id}">${escapeHtml(g.name)} — ${fmtMoney(Math.max(0, g.target - g.saved))} to go</option>`).join('');
+
+  // Six months from the month on screen, at each goal's current monthly pace:
+  // the balance it reaches, and whether the target falls inside that window.
+  const outlookRows = state.goals.map((g) => {
+    const projected = Math.min(g.target, Math.round((g.saved + g.monthly * 6) * 100) / 100);
+    const funded = projected >= g.target;
+    const when = monthLabel(shiftMonth(monthKey, 6));
+    return `<div class="bill-row"><div class="bill-main"><p><b>${escapeHtml(g.name)}</b></p>
+      <p class="sub">${funded ? `Fully funded before ${when}` : `${fmtMoney(projected)} of ${fmtMoney(g.target)} by ${when} (${pct(projected, g.target)}%)`}</p></div>
+      <b>${funded ? 'Done' : fmtMoney(projected)}</b></div>`;
+  }).join('');
+
   return `
   <div class="page-head">
     <h1>Savings goals</h1>
@@ -72,10 +86,59 @@ export function renderGoals(monthKey) {
     <div class="card"><p class="stat-label">Combined target</p><p class="stat-value">${fmtWhole(totalTarget)}</p><p class="stat-note">${pct(totalSaved, totalTarget)}% of the way there</p></div>
     <div class="card"><p class="stat-label">Monthly pace</p><p class="stat-value">${fmtWhole(totalMonthly)}</p><p class="stat-note">Automatic, on payday</p></div>
   </div>
+  <div class="card" style="margin-top:16px">
+    <h2>What if we put in a little more?</h2>
+    <p class="sub">Pick a goal and an extra monthly amount — the finish date moves on the spot. Nothing here changes the savings; it only shows what the extra would do.</p>
+    <div class="toolbar" style="margin:0">
+      <select id="whatif-goal" class="inline-input" aria-label="Goal to test">${goalOptions}</select>
+      <label class="sub" for="whatif-extra">extra per month $
+        <input id="whatif-extra" class="inline-input" type="number" min="0" step="5" value="50" aria-label="Extra amount per month" style="width:90px">
+      </label>
+      <button class="btn btn-small" id="whatif-run" type="button">Work it out</button>
+    </div>
+    <p id="whatif-result" class="sub" style="margin-top:12px">Choose a goal and an amount, then work it out.</p>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2>Six months from now</h2>
+    <p class="sub">Where each pot lands if the monthly pace holds and nothing extra goes in — counted from ${escapeHtml(monthLabel(monthKey))}.</p>
+    ${outlookRows}
+  </div>
   <div class="grid grid-2" style="margin-top:16px">${cards}</div>`;
 }
 
-export function bindGoals(rerender) {
+// The what-if answer for one goal: at the current monthly pace the goal
+// lands in N months; with the extra amount it lands sooner. The finish
+// month is counted from the month on screen, not from today.
+function whatIfAnswer(goal, extra, monthKey) {
+  const remaining = goal.target - goal.saved;
+  if (remaining <= 0) return `${escapeHtml(goal.name)} is already fully funded — pick another goal to test.`;
+  if (!goal.monthly || goal.monthly <= 0) return `${escapeHtml(goal.name)} has no monthly amount set, so there is no pace to speed up.`;
+  const cleanExtra = Number.isFinite(extra) && extra > 0 ? extra : 0;
+  const monthsNow = Math.ceil(remaining / goal.monthly);
+  const monthsFaster = Math.ceil(remaining / (goal.monthly + cleanExtra));
+  const sooner = monthsNow - monthsFaster;
+  const finishNow = monthLabel(shiftMonth(monthKey, monthsNow));
+  const finishFaster = monthLabel(shiftMonth(monthKey, monthsFaster));
+  if (cleanExtra <= 0) {
+    return `At ${fmtWhole(goal.monthly)} a month, ${escapeHtml(goal.name)} finishes in ${finishNow} (${monthsNow} months). Add an extra amount to see it move.`;
+  }
+  if (sooner <= 0) {
+    return `An extra ${fmtWhole(cleanExtra)} a month still lands ${escapeHtml(goal.name)} in ${finishFaster} — the goal is nearly there already.`;
+  }
+  return `An extra ${fmtWhole(cleanExtra)} a month brings ${escapeHtml(goal.name)} forward from ${finishNow} to ${finishFaster} — ${sooner} month${sooner === 1 ? '' : 's'} sooner, for ${fmtWhole(goal.monthly + cleanExtra)} a month instead of ${fmtWhole(goal.monthly)}.`;
+}
+
+export function bindGoals(monthKey, rerender) {
+  const runBtn = document.getElementById('whatif-run');
+  if (runBtn) runBtn.addEventListener('click', () => {
+    const select = document.getElementById('whatif-goal');
+    const extraInput = document.getElementById('whatif-extra');
+    const result = document.getElementById('whatif-result');
+    if (!select || !extraInput || !result) return;
+    const goal = getState().goals.find((g) => g.id === select.value);
+    if (!goal) return;
+    result.innerHTML = whatIfAnswer(goal, parseFloat(extraInput.value) || 0, monthKey);
+  });
   document.querySelectorAll('[data-goal-form]').forEach((form) => {
     form.addEventListener('submit', (e) => {
       e.preventDefault();

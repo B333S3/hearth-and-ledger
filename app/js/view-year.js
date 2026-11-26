@@ -87,6 +87,63 @@ function goalYearSnapshot() {
   };
 }
 
+// The eight largest single outgoings in the ledger, rent included — the
+// purchases that moved the month, each with its date and category.
+function largestPurchases(limit) {
+  const household = getState();
+  return household.transactions
+    .filter((entry) => entry.amount < 0)
+    .map((entry) => ({ entry, magnitude: -entry.amount }))
+    .sort((a, b) => b.magnitude - a.magnitude)
+    .slice(0, limit);
+}
+
+// One savings rate per month: the share of that month's income the household
+// kept, from the same six rows the chart on Insights draws from.
+function savingsRateByMonth(rows) {
+  return rows.map((row) => ({
+    label: row.label,
+    rate: row.income ? Math.round(((row.income - row.spent) / row.income) * 100) : 0,
+    kept: row.kept,
+  }));
+}
+
+// The subscriptions and standing charges hiding in the ledger: a payee that
+// took money in both ledger months, for amounts within a sixth of each other,
+// is treated as recurring. The list is the household's real subscription
+// bill — the charges that keep coming whether anyone notices or not.
+function recurringCharges() {
+  const household = getState();
+  const byPayee = {};
+  for (const entry of household.transactions) {
+    if (entry.amount >= 0) continue;
+    const key = entry.payee.trim().toLowerCase();
+    const bucket = byPayee[key] || { payee: entry.payee, category: entry.category, months: {}, amounts: [] };
+    bucket.months[entry.date.slice(0, 7)] = true;
+    bucket.amounts.push(-entry.amount);
+    byPayee[key] = bucket;
+  }
+  return Object.values(byPayee)
+    .filter((bucket) => {
+      const seen = Object.keys(bucket.months);
+      if (seen.length < LEDGER_MONTHS.length) return false;
+      const biggest = Math.max(...bucket.amounts);
+      const smallest = Math.min(...bucket.amounts);
+      return biggest > 0 && (biggest - smallest) / biggest <= 1 / 6;
+    })
+    .map((bucket) => {
+      const typical = bucket.amounts.reduce((sum, value) => sum + value, 0) / bucket.amounts.length;
+      return {
+        payee: bucket.payee,
+        cat: categoryById(bucket.category),
+        typical: Math.round(typical * 100) / 100,
+        yearly: Math.round(typical * 12 * 100) / 100,
+        times: bucket.amounts.length,
+      };
+    })
+    .sort((a, b) => b.typical - a.typical);
+}
+
 function barRow(label, value, max, color, note) {
   const width = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return `<div class="bill-row">
@@ -129,6 +186,39 @@ export function renderYear() {
   const monthBars = rows.map((row) => monthBarRow(row, maxFlow)).join('');
   const categoryBars = categories.slice(0, 5).map(({ cat, total }) =>
     barRow(cat.name, total, maxCategory, cat.color, 'from the October–November ledger')).join('');
+  const purchases = largestPurchases(8);
+  const purchaseRows = purchases.map(({ entry, magnitude }) => {
+    const cat = categoryById(entry.category);
+    return `<div class="bill-row">
+      <span class="cat-dot" style="background:${cat.color}"></span>
+      <div class="bill-main"><p><b>${escapeHtml(entry.payee)}</b> <span class="sub">${cat.name}</span></p>
+      <p class="sub">${escapeHtml(entry.date)}${entry.note ? ' · ' + escapeHtml(entry.note) : ''}</p></div>
+      <b>${fmtMoney(magnitude)}</b>
+    </div>`;
+  }).join('');
+  const rates = savingsRateByMonth(rows);
+  const rateRows = rates.map(({ label, rate, kept }) => {
+    const width = Math.max(2, Math.min(100, Math.abs(rate)));
+    const tone = rate >= 20 ? '#2E7D5B' : rate >= 0 ? '#D9A441' : '#C24B5A';
+    return `<div class="bill-row">
+      <div class="bill-main">
+        <p><b>${escapeHtml(label)}</b> <span class="sub">kept ${fmtMoney(kept)}</span></p>
+        <div style="height:10px;background:var(--line,#e8dfd2);border-radius:99px;overflow:hidden;margin-top:6px">
+          <div style="height:100%;width:${width}%;background:${tone};border-radius:99px"></div>
+        </div>
+      </div>
+      <b>${rate}%</b>
+    </div>`;
+  }).join('');
+  const recurring = recurringCharges();
+  const recurringRows = recurring.map((charge) =>
+    `<div class="bill-row">
+      <span class="cat-dot" style="background:${charge.cat.color}"></span>
+      <div class="bill-main"><p><b>${escapeHtml(charge.payee)}</b> <span class="sub">${charge.cat.name} · ${charge.times} charges seen</span></p>
+      <p class="sub">about ${fmtMoney(charge.typical)} a month</p></div>
+      <b>${fmtMoney(charge.yearly)} / year</b>
+    </div>`).join('');
+  const recurringYearly = recurring.reduce((sum, charge) => sum + charge.yearly, 0);
   const billRows = bills.perBill.map(({ bill, paidCount }) => {
     const cat = categoryById(bill.category);
     return `<div class="bill-row">
@@ -177,6 +267,25 @@ export function renderYear() {
       ${goalRows}
       <p class="mini-note" style="margin-top:12px">The emergency fund carries the year: more than two-thirds of everything the household has put aside sits in that one pot.</p>
     </div>
+  </div>
+  <div class="grid grid-2" style="margin-top:16px">
+    <div class="card">
+      <h2>Biggest single purchases</h2>
+      <p class="sub">The eight outgoings that moved a month most — rent tops the list, as it should; the rest is where the year actually went.</p>
+      ${purchaseRows}
+    </div>
+    <div class="card">
+      <h2>Savings rate, month by month</h2>
+      <p class="sub">Green clears the household's 20% aim, amber falls short of it, red means the month spent more than it earned.</p>
+      ${rateRows}
+      <p class="mini-note" style="margin-top:12px">November's rate is high because the month is still open — the Thanksgiving shops are in, but the last week of spending is not.</p>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2>The quiet subscriptions</h2>
+    <p class="sub">Payees that took money in both October and November for near-identical amounts — the charges that renew themselves. Together they cost ${fmtWhole(recurringYearly)} a year.</p>
+    ${recurringRows || '<p class="mini-note">No payee charged in both ledger months — nothing here renews itself.</p>'}
+    <p class="mini-note" style="margin-top:12px">Rent and the autopay bills are not in this list: they live on the Bills page. These are the extras — the streaming, the apps, the small print.</p>
   </div>
   <p style="margin-top:18px"><a href="#/insights">← Back to Insights</a></p>`;
 }

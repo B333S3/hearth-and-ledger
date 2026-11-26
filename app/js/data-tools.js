@@ -3,7 +3,7 @@
 // earlier, and reset everything to the opening figures. Nothing here touches
 // the network; the file never leaves the household's own device.
 
-import { getState, replaceState, resetAll } from './store.js';
+import { getState, replaceState, resetAll, addTransaction, categoryById } from './store.js';
 import { toast } from './forms.js';
 import { todayISO } from './money.js';
 
@@ -43,6 +43,126 @@ export function exportLedgerJSON() {
   const payload = JSON.stringify(snapshotForExport(), null, 2);
   triggerDownload('hearth-ledger-export-' + todayISO() + '.json', payload);
   toast('Exported ' + getState().transactions.length + ' transactions as JSON');
+}
+
+// A single CSV field: wrapped in quotes when it holds a comma, a quote or a
+// line break, with inner quotes doubled — the shape a spreadsheet expects.
+export function csvEscape(value) {
+  const text = value === null || value === undefined ? '' : String(value);
+  if (/[",\n\r]/.test(text)) return '"' + text.replaceAll('"', '""') + '"';
+  return text;
+}
+
+export function transactionsToCSV(rows) {
+  const header = ['date', 'payee', 'category', 'amount', 'account', 'note'];
+  const lines = [header.join(',')];
+  for (const row of rows) {
+    lines.push([
+      csvEscape(row.date),
+      csvEscape(row.payee),
+      csvEscape(row.category),
+      csvEscape(Number(row.amount).toFixed(2)),
+      csvEscape(row.account),
+      csvEscape(row.note || ''),
+    ].join(','));
+  }
+  return lines.join('\n') + '\n';
+}
+
+// The whole ledger as a spreadsheet-ready CSV: every transaction, oldest
+// first, so the household can sort, filter and chart it anywhere.
+export function exportLedgerCSV() {
+  const household = getState();
+  const ordered = [...household.transactions].sort((a, b) => (a.date < b.date ? -1 : 1));
+  triggerDownload('hearth-ledger-transactions-' + todayISO() + '.csv', transactionsToCSV(ordered));
+  toast('Exported ' + ordered.length + ' transactions as CSV');
+}
+
+// A small CSV reader: splits a file into rows of fields, honouring quoted
+// fields that hold commas, doubled quotes or line breaks inside them.
+// Returns null when a quote is left open — the file is not a well-formed CSV.
+export function parseCSV(text) {
+  const rows = [];
+  let fields = [];
+  let current = '';
+  let quoted = false;
+  let i = 0;
+  const pushField = () => { fields.push(current); current = ''; };
+  const pushRow = () => { pushField(); rows.push(fields); fields = []; };
+  while (i < text.length) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { current += '"'; i += 2; continue; }
+        quoted = false;
+        i += 1;
+        continue;
+      }
+      current += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '"') { quoted = true; i += 1; continue; }
+    if (ch === ',') { pushField(); i += 1; continue; }
+    if (ch === '\n') { pushRow(); i += 1; continue; }
+    if (ch === '\r') { i += 1; continue; }
+    current += ch;
+    i += 1;
+  }
+  if (quoted) return null;
+  if (current !== '' || fields.length > 0) pushRow();
+  return rows.filter((row) => row.some((field) => field.trim() !== ''));
+}
+
+// Turn CSV rows into ledger entries. The first row must be the header the
+// export writes (date,payee,category,amount,account,note); every later row
+// needs a real date and a finite amount, and its category must be one the
+// household tracks — anything else is refused with the row number.
+export function csvRowsToTransactions(rows) {
+  if (!rows || rows.length < 2) return { error: 'The CSV has no transactions under its header row.' };
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const wanted = ['date', 'payee', 'category', 'amount', 'account', 'note'];
+  if (header.join(',') !== wanted.join(',')) {
+    return { error: 'The CSV header should be: ' + wanted.join(', ') + ' — this file starts differently.' };
+  }
+  const entries = [];
+  for (let r = 1; r < rows.length; r += 1) {
+    const row = rows[r];
+    const [date, payee, category, amountText, account, note] = row;
+    const amount = parseFloat(amountText);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return { error: 'Row ' + (r + 1) + ' has no usable date (use YYYY-MM-DD).' };
+    if (!Number.isFinite(amount)) return { error: 'Row ' + (r + 1) + ' has no usable amount.' };
+    if (!payee || !payee.trim()) return { error: 'Row ' + (r + 1) + ' has no payee.' };
+    const known = categoryById(category || '');
+    if (!category || category !== known.id) {
+      return { error: 'Row ' + (r + 1) + ' names a category the household does not track: ' + (category || '(blank)') + '.' };
+    }
+    entries.push({ date, payee: payee.trim(), category, amount, account: account || 'checking', note: note || '' });
+  }
+  return { entries };
+}
+
+export async function importLedgerCSV(file, rerender) {
+  let text;
+  try {
+    text = await readFileAsText(file);
+  } catch {
+    toast('That file could not be read — try exporting again first.');
+    return;
+  }
+  const rows = parseCSV(text);
+  if (rows === null) {
+    toast('That CSV has a quote left open — it cannot be read.');
+    return;
+  }
+  const { entries, error } = csvRowsToTransactions(rows);
+  if (error) {
+    toast(error);
+    return;
+  }
+  for (const entry of entries) addTransaction(entry);
+  toast('Imported ' + entries.length + ' transactions from the CSV');
+  rerender(false);
 }
 
 // A file is only trusted as an import when it carries the app marker, the
@@ -125,6 +245,8 @@ export function resetLedgerData(rerender) {
 export function bindDataTools(rerender) {
   const exportBtn = document.getElementById('data-export');
   if (exportBtn) exportBtn.addEventListener('click', () => exportLedgerJSON());
+  const exportCsvBtn = document.getElementById('data-export-csv');
+  if (exportCsvBtn) exportCsvBtn.addEventListener('click', () => exportLedgerCSV());
   const importBtn = document.getElementById('data-import-btn');
   const picker = document.getElementById('data-import-file');
   if (importBtn && picker) {
@@ -133,6 +255,16 @@ export function bindDataTools(rerender) {
       const file = picker.files && picker.files[0];
       picker.value = '';
       if (file) importLedgerFile(file, rerender);
+    });
+  }
+  const importCsvBtn = document.getElementById('data-import-csv-btn');
+  const csvPicker = document.getElementById('data-import-csv-file');
+  if (importCsvBtn && csvPicker) {
+    importCsvBtn.addEventListener('click', () => csvPicker.click());
+    csvPicker.addEventListener('change', () => {
+      const file = csvPicker.files && csvPicker.files[0];
+      csvPicker.value = '';
+      if (file) importLedgerCSV(file, rerender);
     });
   }
   const resetBtn = document.getElementById('data-reset');
