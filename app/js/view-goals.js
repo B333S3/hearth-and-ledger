@@ -2,8 +2,8 @@
 // along each goal is, when it lands at the current monthly pace, and a working
 // "add money" control on every goal that moves the ring, the bar and the date.
 
-import { getState, addToGoal } from './store.js';
-import { fmtMoney, fmtWhole, monthLabel, shiftMonth, pct, escapeHtml } from './money.js';
+import { getState, recordGoalContribution, goalHistory, goalContributedTotal } from './store.js';
+import { fmtMoney, fmtWhole, fmtDay, monthLabel, shiftMonth, pct, escapeHtml } from './money.js';
 import { ringSVG } from './charts.js';
 import { toast } from './forms.js';
 
@@ -15,6 +15,24 @@ function etaLabel(goal, monthKey) {
   if (!goal.monthly) return 'No monthly amount set yet';
   const months = Math.ceil(remaining / goal.monthly);
   return `On pace for ${monthLabel(shiftMonth(monthKey, months))} at ${fmtWhole(goal.monthly)}/month`;
+}
+
+// The goal's own top-up ledger: the newest five entries, newest first, with
+// the running total of everything added this way (the monthly automatic
+// transfers are not itemised — only the top-ups made on this page).
+function historyHtml(goal) {
+  const entries = goalHistory(goal.id);
+  const added = goalContributedTotal(goal.id);
+  if (!entries.length) {
+    return `<p class="mini-note" style="margin-top:12px">No extra top-ups yet — the first one you add here will appear in this list with its date.</p>`;
+  }
+  const rows = entries.slice(0, 5).map((entry) =>
+    `<div class="bill-row"><div class="bill-main"><p>${escapeHtml(entry.note || 'Top-up')}</p><p class="sub">${fmtDay(entry.date)}</p></div><b class="pos">${fmtMoney(entry.amount)}</b></div>`).join('');
+  return `<div style="margin-top:12px">
+    <p class="sub">Recent top-ups — ${entries.length} in total, ${fmtMoney(added)} added this way</p>
+    ${rows}
+    ${entries.length > 5 ? `<p class="mini-note" style="margin-top:8px">Showing the newest five of ${entries.length} top-ups.</p>` : ''}
+  </div>`;
 }
 
 export function renderGoals(monthKey) {
@@ -37,8 +55,10 @@ export function renderGoals(monthKey) {
       <p style="margin:12px 0">${escapeHtml(g.note)}</p>
       <form class="toolbar" data-goal-form="${g.id}" style="margin:0">
         <input class="inline-input" type="number" min="0.01" step="0.01" placeholder="Add $" aria-label="Amount to add to ${escapeHtml(g.name)}" style="width:110px">
+        <input class="inline-input" type="text" maxlength="60" placeholder="Note (optional)" aria-label="Note for this top-up to ${escapeHtml(g.name)}" style="flex:1;min-width:120px">
         <button class="btn btn-primary btn-small" type="submit">Add money</button>
       </form>
+      ${historyHtml(g)}
     </div>`;
   }).join('');
 
@@ -59,9 +79,12 @@ export function bindGoals(rerender) {
   document.querySelectorAll('[data-goal-form]').forEach((form) => {
     form.addEventListener('submit', (e) => {
       e.preventDefault();
-      const amount = parseFloat(form.querySelector('input').value) || 0;
+      const inputs = form.querySelectorAll('input');
+      const amount = parseFloat(inputs[0].value) || 0;
       if (amount <= 0) return;
-      addToGoal(form.dataset.goalForm, amount);
+      const note = inputs[1] ? inputs[1].value.trim() : '';
+      const entry = recordGoalContribution(form.dataset.goalForm, amount, note);
+      if (!entry) return;
       toast('Added ' + fmtMoney(amount) + ' to the goal');
       rerender(false);
     });

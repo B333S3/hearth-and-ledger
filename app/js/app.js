@@ -10,6 +10,7 @@ import { renderTransactions, bindTransactions } from './view-transactions.js';
 import { renderBills, bindBills } from './view-bills.js';
 import { renderGoals, bindGoals } from './view-goals.js';
 import { renderInsights } from './view-insights.js';
+import { renderYear } from './view-year.js';
 
 const MONTHS = ['2026-10', '2026-11'];
 let currentMonth = '2026-11';
@@ -21,6 +22,10 @@ const ROUTES = {
   bills: { render: renderBills, bind: (rerender) => bindBills(currentMonth, rerender) },
   goals: { render: renderGoals, bind: (rerender) => bindGoals(rerender) },
   insights: { render: renderInsights, bind: () => {} },
+  // The year in review is a sub-page of Insights, reached only from the link
+  // at the bottom of that page: it has no side-navigation entry, so the
+  // six-item menu stays as photographed.
+  year: { render: renderYear, bind: () => {} },
 };
 
 function routeName() {

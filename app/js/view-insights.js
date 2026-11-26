@@ -87,5 +87,11 @@ export function renderInsights(monthKey) {
       <div class="tip"><span class="tip-ico">▶</span><p><b>Three streaming bills, one household.</b> Fun &amp; Streaming totals ${fmtMoney(funNow)} this month across Netflix, Hulu and Spotify. Rotating one service off per quarter would free about ${fmtMoney(180)} a year for the road-trip fund.</p></div>
       <div class="tip"><span class="tip-ico">🎄</span><p><b>Christmas is ${pct(christmasGoal.saved, christmasGoal.target)}% funded</b> with the December top-up still to come — the first year the Parkers will not meet January with a card balance from December.</p></div>
     </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Zoom out: the whole year</h2>
+    <p class="sub">Six months on one page — month by month, where the ledger money went, how the bills fared and how far the savings pots got.</p>
+    <p><a href="#/year/2026">See 2026 in review →</a></p>
   </div>`;
 }

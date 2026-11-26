@@ -8,23 +8,65 @@ import {
 } from './store.js';
 import { fmtMoney, fmtSigned, fmtDay, escapeHtml } from './money.js';
 import { openTransactionModal, toast } from './forms.js';
+import { bindDataTools } from './data-tools.js';
 
 let query = '';
 let filterCat = 'all';
+let rangeStart = '';
+let rangeEnd = '';
+let sortMode = 'newest';
+
+const SORT_LABELS = {
+  newest: 'Newest first',
+  oldest: 'Oldest first',
+  largest: 'Largest amount',
+  smallest: 'Smallest amount',
+};
+
+function sortRows(rows) {
+  const copy = [...rows];
+  if (sortMode === 'oldest') return copy.sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (sortMode === 'largest') return copy.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  if (sortMode === 'smallest') return copy.sort((a, b) => Math.abs(a.amount) - Math.abs(b.amount));
+  return copy.sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+function categorySubtotals(rows) {
+  const totals = {};
+  for (const entry of rows) {
+    if (entry.amount < 0) totals[entry.category] = (totals[entry.category] || 0) - entry.amount;
+  }
+  return Object.entries(totals)
+    .map(([id, total]) => ({ cat: categoryById(id), total }))
+    .sort((a, b) => b.total - a.total);
+}
 
 export function renderTransactions(monthKey) {
   const all = transactionsInMonth(monthKey);
-  const rows = all.filter((t) => {
+  const ranged = all.filter((t) => {
+    if (rangeStart && t.date < rangeStart) return false;
+    if (rangeEnd && t.date > rangeEnd) return false;
+    return true;
+  });
+  const rows = sortRows(ranged.filter((t) => {
     if (filterCat !== 'all' && t.category !== filterCat) return false;
     if (query) {
       const hay = (t.payee + ' ' + t.note + ' ' + categoryById(t.category).name).toLowerCase();
       if (!hay.includes(query.toLowerCase())) return false;
     }
     return true;
-  });
+  }));
 
   const inSum = rows.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const outSum = rows.filter((t) => t.amount < 0).reduce((s, t) => s - t.amount, 0);
+  const subtotals = categorySubtotals(rows);
+  const subtotalHtml = subtotals.length ? subtotals.slice(0, 4).map(({ cat, total }) =>
+    `<div class="bill-row"><span class="cat-dot" style="background:${cat.color}"></span><div class="bill-main"><p>${cat.name}</p></div><b>${fmtMoney(total)}</b></div>`).join('')
+    + (subtotals.length > 4 ? `<p class="mini-note" style="margin-top:8px">Plus ${subtotals.length - 4} more categor${subtotals.length - 4 === 1 ? 'y' : 'ies'} in the rows on screen.</p>` : '')
+    : '<p class="mini-note">No spending in the rows on screen — nothing to break down.</p>';
+  const rangeActive = rangeStart || rangeEnd;
+  const sortOptions = Object.entries(SORT_LABELS).map(([value, label]) =>
+    `<option value="${value}" ${sortMode === value ? 'selected' : ''}>${label}</option>`).join('');
 
   const body = rows.length ? rows.map((t) => {
     const cat = categoryById(t.category);
@@ -57,10 +99,26 @@ export function renderTransactions(monthKey) {
     <span class="spacer"></span>
     <button class="btn btn-primary" id="tx-add" type="button">+ Add transaction</button>
   </div>
+  <div class="toolbar">
+    <label class="sub" for="tx-from">From <input id="tx-from" class="inline-input" type="date" value="${rangeStart}" aria-label="Show entries from this date"></label>
+    <label class="sub" for="tx-to">to <input id="tx-to" class="inline-input" type="date" value="${rangeEnd}" aria-label="Show entries up to this date"></label>
+    ${rangeActive ? '<button class="btn btn-small" id="tx-range-clear" type="button">Clear dates</button>' : ''}
+    <select id="tx-sort" class="inline-input" aria-label="Sort transactions">${sortOptions}</select>
+    <span class="spacer"></span>
+    <button class="btn btn-small" id="data-export" type="button">Export JSON</button>
+    <button class="btn btn-small" id="data-import-btn" type="button">Import JSON</button>
+    <input id="data-import-file" type="file" accept="application/json,.json" hidden>
+    <button class="btn btn-small" id="data-reset" type="button">Reset data</button>
+  </div>
   <div class="grid grid-3">
-    <div class="card"><p class="stat-label">Showing</p><p class="stat-value">${rows.length}</p><p class="stat-note">of ${all.length} entries this month</p></div>
+    <div class="card"><p class="stat-label">Showing</p><p class="stat-value">${rows.length}</p><p class="stat-note">of ${all.length} entries this month${rangeActive ? ' in the chosen dates' : ''}</p></div>
     <div class="card"><p class="stat-label">Money in (shown)</p><p class="stat-value pos">${fmtMoney(inSum)}</p><p class="stat-note">Income among the rows on screen</p></div>
     <div class="card"><p class="stat-label">Money out (shown)</p><p class="stat-value">${fmtMoney(outSum)}</p><p class="stat-note">Spending among the rows on screen</p></div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2>Spending breakdown — rows on screen</h2>
+    <p class="sub">The same filters as the table above, added up by category. Narrow the dates or the category and this answers itself.</p>
+    ${subtotalHtml}
   </div>
   <div class="card" style="margin-top:16px">
     <table class="ledger">
@@ -87,6 +145,23 @@ export function bindTransactions(rerender) {
   });
   const filter = document.getElementById('tx-filter');
   if (filter) filter.addEventListener('change', () => { filterCat = filter.value; rerender(false); });
+  const from = document.getElementById('tx-from');
+  if (from) from.addEventListener('change', () => {
+    rangeStart = from.value;
+    if (rangeEnd && rangeStart && rangeStart > rangeEnd) rangeEnd = rangeStart;
+    rerender(false);
+  });
+  const to = document.getElementById('tx-to');
+  if (to) to.addEventListener('change', () => {
+    rangeEnd = to.value;
+    if (rangeStart && rangeEnd && rangeEnd < rangeStart) rangeStart = rangeEnd;
+    rerender(false);
+  });
+  const clearRange = document.getElementById('tx-range-clear');
+  if (clearRange) clearRange.addEventListener('click', () => { rangeStart = ''; rangeEnd = ''; rerender(false); });
+  const sort = document.getElementById('tx-sort');
+  if (sort) sort.addEventListener('change', () => { sortMode = sort.value; rerender(false); });
+  bindDataTools(rerender);
   const add = document.getElementById('tx-add');
   if (add) add.addEventListener('click', () => openTransactionModal());
   document.querySelectorAll('[data-edit]').forEach((btn) => {

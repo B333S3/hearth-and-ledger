@@ -14,7 +14,9 @@
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import {
+  cpSync, existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-frontend.ts';
@@ -34,3 +36,52 @@ writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, { text_max_bytes: 163840, screenshots: { max: 4, max_bytes: 262144 }, app_max_files: 993, app_max_bytes: 16777216 }),
 );
+
+// --- Build check (this entry's own addition; it reads the output back and
+// reports, it never rewrites dossier.json, so the scorer's byte-for-byte
+// comparison still holds) -----------------------------------------------
+// Walk the copied app/ tree, count the files and bytes, and confirm nothing
+// in it reaches the network: the site's promise is "fully offline", so any
+// http(s) URL, remote script or stylesheet reference in the shipped files is
+// a defect, not a feature.
+function collectFiles(dir) {
+  const found = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...collectFiles(path));
+    else if (entry.isFile()) found.push(path);
+  }
+  return found;
+}
+
+const dossierPath = join(out, 'dossier.json');
+const dossier = JSON.parse(readFileSync(dossierPath, 'utf8'));
+const shippedFiles = collectFiles(join(out, 'app'));
+const shippedBytes = shippedFiles.reduce((sum, path) => sum + statSync(path).size, 0);
+const externalPattern = /https?:\/\/|src=["']https?:|href=["']https?:|@import\s+["']https?:|url\(\s*["']?https?:/i;
+const offenders = shippedFiles.filter((path) => externalPattern.test(readFileSync(path, 'utf8')));
+const screenshotCount = Array.isArray(dossier.images) ? dossier.images.length : 0;
+const loadMatch = typeof dossier.text === 'string'
+  ? dossier.text.match(/first load (\d+) files, (\d+) bytes gzip-9 \((\d+) raw\)/)
+  : null;
+const firstLoadFiles = loadMatch ? Number(loadMatch[1]) : 0;
+const firstLoadBytes = loadMatch ? Number(loadMatch[3]) : 0;
+
+const problems = [];
+if (!dossier || typeof dossier !== 'object') problems.push('dossier.json did not parse into an object');
+if (offenders.length > 0) problems.push(offenders.length + ' shipped file(s) reference a remote URL: ' + offenders.join(', '));
+if (screenshotCount === 0) problems.push('no screenshots were listed in the dossier');
+if (firstLoadFiles === 0) problems.push('the dossier lists no first-load files');
+if (firstLoadBytes <= 0) problems.push('the dossier lists zero first-load bytes');
+
+console.log('Hearth & Ledger build summary');
+console.log('  app files shipped: ' + shippedFiles.length + ' (' + shippedBytes + ' bytes)');
+console.log('  first load: ' + firstLoadFiles + ' files, ' + firstLoadBytes + ' bytes');
+console.log('  screenshots: ' + screenshotCount);
+console.log('  external URL references: ' + offenders.length);
+if (problems.length > 0) {
+  for (const problem of problems) console.error('  BUILD CHECK FAILED: ' + problem);
+  process.exitCode = 1;
+} else {
+  console.log('  build check: ok — fully offline, dossier written');
+}

@@ -2,7 +2,7 @@
 // Holds the seed figures the site opens with, persists every change to localStorage,
 // and answers the questions the views ask (month totals, per-category spend, bill status).
 
-import { monthKeyOf } from './money.js';
+import { monthKeyOf, todayISO } from './money.js';
 
 const STORAGE_KEY = 'hearth-ledger-v1';
 
@@ -176,6 +176,31 @@ export function resetAll() {
   save();
 }
 
+// Swap the whole household record for an imported snapshot. The snapshot is
+// only accepted when every collection the views read is present and shaped
+// right; a bad file leaves the current figures untouched and reports false.
+export function replaceState(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  const { transactions, bills, goals, accounts } = snapshot;
+  if (!Array.isArray(transactions) || !Array.isArray(bills) || !Array.isArray(goals) || !Array.isArray(accounts)) return false;
+  if (!transactions.every((t) => t && typeof t.id === 'string' && typeof t.date === 'string' && Number.isFinite(t.amount))) return false;
+  if (!bills.every((b) => b && typeof b.id === 'string' && Array.isArray(b.paidMonths))) return false;
+  if (!goals.every((g) => g && typeof g.id === 'string' && Number.isFinite(g.saved) && Number.isFinite(g.target))) return false;
+  state = {
+    household: typeof snapshot.household === 'string' ? snapshot.household : state.household,
+    members: typeof snapshot.members === 'string' ? snapshot.members : state.members,
+    accounts: structuredClone(accounts),
+    budgets: snapshot.budgets && typeof snapshot.budgets === 'object' ? structuredClone(snapshot.budgets) : state.budgets,
+    monthlySummary: Array.isArray(snapshot.monthlySummary) ? structuredClone(snapshot.monthlySummary) : state.monthlySummary,
+    transactions: structuredClone(transactions),
+    bills: structuredClone(bills),
+    goals: structuredClone(goals),
+    billPayments: Array.isArray(snapshot.billPayments) ? structuredClone(snapshot.billPayments) : [],
+  };
+  save();
+  return true;
+}
+
 export function getState() { return state; }
 
 let uidCounter = 1000;
@@ -210,9 +235,65 @@ export function toggleBillPaid(billId, monthKey, paid) {
   save();
 }
 
+// Record a real payment against a bill: tick the month as paid and keep the
+// receipt (amount actually sent, and the day it went out) in the household's
+// payment log, so the Bills page can show what was paid and when.
+export function recordBillPayment(billId, monthKey, amount, paidOn) {
+  const bill = state.bills.find((b) => b.id === billId);
+  if (!bill) return null;
+  const clean = Math.round(amount * 100) / 100;
+  if (!Number.isFinite(clean) || clean <= 0) return null;
+  const day = typeof paidOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(paidOn) ? paidOn : todayISO();
+  if (!Array.isArray(state.billPayments)) state.billPayments = [];
+  const receipt = { billId, month: monthKey, amount: clean, date: day };
+  state.billPayments.push(receipt);
+  const set = new Set(bill.paidMonths);
+  set.add(monthKey);
+  bill.paidMonths = [...set];
+  save();
+  return receipt;
+}
+
+export function billPaymentsFor(billId) {
+  if (!Array.isArray(state.billPayments)) return [];
+  return state.billPayments
+    .filter((entry) => entry.billId === billId)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+export function allBillPayments() {
+  if (!Array.isArray(state.billPayments)) return [];
+  return [...state.billPayments].sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
 export function addToGoal(goalId, amount) {
   const goal = state.goals.find((g) => g.id === goalId);
   if (goal) { goal.saved = Math.round((goal.saved + amount) * 100) / 100; save(); }
+}
+
+// Feed a goal and keep the receipt: the contribution is appended to the
+// goal's own history (created the first time it is needed) with today's date,
+// so the Goals page can show every top-up instead of only the running total.
+export function recordGoalContribution(goalId, amount, note) {
+  const goal = state.goals.find((g) => g.id === goalId);
+  if (!goal) return null;
+  const clean = Math.round(amount * 100) / 100;
+  if (!Number.isFinite(clean) || clean <= 0) return null;
+  if (!Array.isArray(goal.history)) goal.history = [];
+  goal.history.push({ date: todayISO(), amount: clean, note: typeof note === 'string' ? note : '' });
+  goal.saved = Math.round((goal.saved + clean) * 100) / 100;
+  save();
+  return goal.history[goal.history.length - 1];
+}
+
+export function goalHistory(goalId) {
+  const goal = state.goals.find((g) => g.id === goalId);
+  if (!goal || !Array.isArray(goal.history)) return [];
+  return [...goal.history].sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+export function goalContributedTotal(goalId) {
+  return goalHistory(goalId).reduce((sum, entry) => sum + entry.amount, 0);
 }
 
 // ---------------------------------------------------------------- queries
@@ -220,6 +301,19 @@ export function addToGoal(goalId, amount) {
 export function transactionsInMonth(monthKey) {
   return state.transactions
     .filter((t) => monthKeyOf(t.date) === monthKey)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+// Every entry whose date falls inside an inclusive ISO range, newest first.
+// An empty bound means "no limit on that side", so a single-sided range is
+// just a call with one end left blank.
+export function transactionsInRange(startIso, endIso) {
+  return state.transactions
+    .filter((t) => {
+      if (startIso && t.date < startIso) return false;
+      if (endIso && t.date > endIso) return false;
+      return true;
+    })
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
