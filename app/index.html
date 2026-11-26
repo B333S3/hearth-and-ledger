@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#FAF5EC">
+<title>Hearth &amp; Ledger — Household Budget</title>
+<meta name="description" content="Hearth & Ledger is a complete household budget that runs entirely from its own files: monthly budgets, a full transaction ledger, bills with due dates, savings goals and spending insights.">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<header id="topbar">
+  <a id="brand" href="#/overview" aria-label="Hearth and Ledger home">
+    <svg id="brand-mark" viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><path d="M16 3 L29 14 H25 V27 a1.5 1.5 0 0 1 -1.5 1.5 h-15 A1.5 1.5 0 0 1 7 27 V14 H3 Z" fill="#C4622D"/><rect x="12.4" y="17" width="7.2" height="8.6" rx="1" fill="#FAF5EC"/><path d="M16 19.4 c1.9 1.5 1.9 3.4 0 4.9 c-1.9 -1.5 -1.9 -3.4 0 -4.9 Z" fill="#2E7D5B"/></svg>
+    <span id="brand-name">Hearth <span class="amp">&amp;</span> Ledger</span>
+  </a>
+  <div id="month-switcher" role="group" aria-label="Choose month">
+    <button id="month-prev" type="button" aria-label="Previous month">&#8249;</button>
+    <span id="month-label">November 2026</span>
+    <button id="month-next" type="button" aria-label="Next month">&#8250;</button>
+  </div>
+  <button id="add-transaction-top" class="btn btn-primary" type="button">+ Add <span class="btn-long">transaction</span></button>
+</header>
+
+<div id="layout">
+  <nav id="sidenav" aria-label="Sections">
+    <a href="#/overview" data-route="overview"><span class="nav-ico">&#8962;</span>Overview</a>
+    <a href="#/budget" data-route="budget"><span class="nav-ico">&#9878;</span>Budget</a>
+    <a href="#/transactions" data-route="transactions"><span class="nav-ico">&#8801;</span>Transactions</a>
+    <a href="#/bills" data-route="bills"><span class="nav-ico">&#128197;</span>Bills</a>
+    <a href="#/goals" data-route="goals"><span class="nav-ico">&#9673;</span>Goals</a>
+    <a href="#/insights" data-route="insights"><span class="nav-ico">&#128200;</span>Insights</a>
+    <p id="nav-note">Every figure on this site is live: add a transaction, pay a bill or feed a goal and the whole household picture updates.</p>
+  </nav>
+
+  <main id="view" tabindex="-1"></main>
+</div>
+
+<nav id="tabbar" aria-label="Sections">
+  <a href="#/overview" data-route="overview"><span class="nav-ico">&#8962;</span>Home</a>
+  <a href="#/budget" data-route="budget"><span class="nav-ico">&#9878;</span>Budget</a>
+  <a href="#/transactions" data-route="transactions"><span class="nav-ico">&#8801;</span>Ledger</a>
+  <a href="#/bills" data-route="bills"><span class="nav-ico">&#128197;</span>Bills</a>
+  <a href="#/goals" data-route="goals"><span class="nav-ico">&#9673;</span>Goals</a>
+  <a href="#/insights" data-route="insights"><span class="nav-ico">&#128200;</span>Trends</a>
+</nav>
+
+<div id="modal-root"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<footer id="site-footer">
+  <p>Hearth &amp; Ledger — a household budget that lives in your browser. No account, no network: your figures never leave this device.</p>
+</footer>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
